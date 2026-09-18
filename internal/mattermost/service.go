@@ -173,13 +173,23 @@ func (s *Service) LoadConversations(ctx context.Context, user *model.User, team 
 			conv.SearchName = ch.Name
 		}
 		if member != nil {
-			conv.Unread = member.LastViewedAt < ch.LastPostAt
+			conv.Unread = channelHasUnread(ch, member)
 			conv.Mention = member.MentionCount > 0
 		}
 		result = append(result, conv)
 	}
 	SortConversations(result)
 	return result, nil
+}
+
+func channelHasUnread(ch *model.Channel, member *model.ChannelMember) bool {
+	if ch == nil || member == nil {
+		return false
+	}
+	// Mattermost tracks the member's read position using message counts.
+	// LastViewedAt can remain stale for old/migrated channels, which causes
+	// false unread indicators when compared directly with LastPostAt.
+	return ch.TotalMsgCount > member.MsgCount
 }
 
 func SortConversations(items []*Conversation) {

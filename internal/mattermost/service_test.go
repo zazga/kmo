@@ -41,3 +41,19 @@ func TestMergePostsDeduplicatesAndSorts(t *testing.T) {
 		t.Fatalf("duplicate should keep incoming post; got %q", got[1].Message)
 	}
 }
+
+func TestChannelHasUnreadUsesMessageCountsNotStaleTimestamp(t *testing.T) {
+	ch := &model.Channel{LastPostAt: 1_700_000_000_000, TotalMsgCount: 42}
+	member := &model.ChannelMember{LastViewedAt: 1, MsgCount: 42}
+	if channelHasUnread(ch, member) {
+		t.Fatal("expected no unread when message counts match despite stale LastViewedAt")
+	}
+}
+
+func TestChannelHasUnreadWhenChannelCountAdvanced(t *testing.T) {
+	ch := &model.Channel{TotalMsgCount: 43}
+	member := &model.ChannelMember{MsgCount: 42}
+	if !channelHasUnread(ch, member) {
+		t.Fatal("expected unread when channel has more messages than member has read")
+	}
+}
