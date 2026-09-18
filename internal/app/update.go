@@ -241,11 +241,11 @@ func (m Model) updateMainKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.alignSidebarCursor()
 			return m, nil
 		}
-		if keyMatches(msg, m.keys.Up) || msg.String() == "ctrl+p" {
+		if isUpKey(msg, m.keys.Up) || msg.String() == "ctrl+p" {
 			m.moveSidebar(-1)
 			return m, nil
 		}
-		if keyMatches(msg, m.keys.Down) || msg.String() == "ctrl+n" {
+		if isDownKey(msg, m.keys.Down) || msg.String() == "ctrl+n" {
 			m.moveSidebar(1)
 			return m, nil
 		}
@@ -315,11 +315,11 @@ func (m Model) updateMainKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	switch m.focus {
 	case ui.FocusSidebar:
-		if keyMatches(msg, m.keys.Up) || msg.String() == "k" {
+		if isUpKey(msg, m.keys.Up) || msg.String() == "k" {
 			m.moveSidebar(-1)
 			return m, nil
 		}
-		if keyMatches(msg, m.keys.Down) || msg.String() == "j" {
+		if isDownKey(msg, m.keys.Down) || msg.String() == "j" {
 			m.moveSidebar(1)
 			return m, nil
 		}
@@ -334,7 +334,7 @@ func (m Model) updateMainKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case ui.FocusChat:
-		if keyMatches(msg, m.keys.Up) || msg.String() == "k" {
+		if isUpKey(msg, m.keys.Up) || msg.String() == "k" {
 			m.moveMessageSelection(-1)
 			m.chat.Viewport.ScrollUp(2)
 			if m.chat.Viewport.AtTop() && m.chat.HasOlder && !m.chat.LoadingOlder {
@@ -342,7 +342,7 @@ func (m Model) updateMainKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		if keyMatches(msg, m.keys.Down) || msg.String() == "j" {
+		if isDownKey(msg, m.keys.Down) || msg.String() == "j" {
 			m.moveMessageSelection(1)
 			m.chat.Viewport.ScrollDown(2)
 			if m.chat.Viewport.AtBottom() {

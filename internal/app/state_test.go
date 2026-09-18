@@ -3,7 +3,10 @@ package app
 import (
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/mattermost/mattermost/server/public/model"
+	"github.com/zazga/kmo/internal/config"
+	mm "github.com/zazga/kmo/internal/mattermost"
 	"github.com/zazga/kmo/internal/ui"
 )
 
@@ -45,5 +48,39 @@ func TestTruncateName(t *testing.T) {
 	got := truncateName("abcdefghijklmnopqrstuvwxyz", 12)
 	if got != "abcdefg....." {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestSidebarPhysicalArrowNavigation(t *testing.T) {
+	m := Model{mode: modeMain, focus: ui.FocusSidebar, sidebar: ui.NewSidebar()}
+	m.keys = newKeymap(config.Defaults().Keybindings)
+	m.sidebar.Filtered = []*mm.Conversation{
+		{Channel: &model.Channel{Id: "a"}, Display: "A"},
+		{Channel: &model.Channel{Id: "b"}, Display: "B"},
+	}
+	next, _ := m.updateMainKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
+	got := next.(Model)
+	if got.sidebar.Cursor != 1 {
+		t.Fatalf("down arrow cursor=%d, want 1", got.sidebar.Cursor)
+	}
+	next, _ = got.updateMainKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyUp}))
+	got = next.(Model)
+	if got.sidebar.Cursor != 0 {
+		t.Fatalf("up arrow cursor=%d, want 0", got.sidebar.Cursor)
+	}
+}
+
+func TestSearchPhysicalArrowNavigation(t *testing.T) {
+	m := Model{mode: modeMain, focus: ui.FocusSidebar, sidebar: ui.NewSidebar()}
+	m.keys = newKeymap(config.Defaults().Keybindings)
+	m.sidebar.Finding = true
+	m.sidebar.Filtered = []*mm.Conversation{
+		{Channel: &model.Channel{Id: "a"}, Display: "A"},
+		{Channel: &model.Channel{Id: "b"}, Display: "B"},
+	}
+	next, _ := m.updateMainKey(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
+	got := next.(Model)
+	if got.sidebar.Cursor != 1 {
+		t.Fatalf("search down arrow cursor=%d, want 1", got.sidebar.Cursor)
 	}
 }
