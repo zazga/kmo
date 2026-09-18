@@ -51,3 +51,9 @@ func TestArrowBindingsMatchDefaults(t *testing.T) {
 		t.Fatal("expected down arrow to match down binding")
 	}
 }
+
+func TestCtrlQMatchesQuitBinding(t *testing.T) {
+	if !keyMatches(tea.KeyPressMsg(tea.Key{Code: 'q', Mod: tea.ModCtrl}), "ctrl+q") {
+		t.Fatal("expected ctrl+q to match quit binding")
+	}
+}

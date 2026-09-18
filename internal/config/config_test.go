@@ -73,3 +73,10 @@ func TestDuplicateBindingFallsBackDeterministically(t *testing.T) {
 		t.Fatal("expected duplicate warning")
 	}
 }
+
+func TestCtrlDefaults(t *testing.T) {
+	cfg := Defaults()
+	if cfg.Keybindings.Find != "ctrl+f" || cfg.Keybindings.Send != "ctrl+enter" || cfg.Keybindings.Shortcuts != "ctrl+h" || cfg.Keybindings.Quit != "ctrl+q" {
+		t.Fatalf("unexpected ctrl defaults: %#v", cfg.Keybindings)
+	}
+}

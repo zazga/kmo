@@ -199,6 +199,7 @@ func (m Model) viewHelp(background string) string {
 		fmt.Sprintf("%-16s %s", m.keys.Send, "send message"),
 		fmt.Sprintf("%-16s %s", m.keys.FocusNext, "next pane"),
 		fmt.Sprintf("%-16s %s", m.keys.FocusPrevious, "previous pane"),
+		fmt.Sprintf("%-16s %s", m.keys.Quit, "quit KMO"),
 		"j / k           navigate",
 		"arrows          navigate",
 		"Esc             cancel current mode",

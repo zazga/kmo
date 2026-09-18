@@ -181,7 +181,7 @@ func (m Model) updateSetup(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.setup.Busy {
 		return m, nil
 	}
-	switch msg.Keystroke() {
+	switch msg.String() {
 	case "tab", "shift+tab":
 		if m.setup.Focus == 0 {
 			m.setup.Server.Blur()
@@ -217,8 +217,16 @@ func (m Model) updateSetup(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateMainKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if keyMatches(msg, m.keys.Quit) {
+		m.cancel()
+		if m.service != nil {
+			m.service.Close()
+		}
+		return m, tea.Quit
+	}
+
 	if m.showHelp {
-		if keyMatches(msg, m.keys.Shortcuts) || keyMatches(msg, m.keys.Cancel) || msg.Keystroke() == "enter" {
+		if keyMatches(msg, m.keys.Shortcuts) || keyMatches(msg, m.keys.Cancel) || msg.String() == "enter" {
 			m.showHelp = false
 		}
 		return m, nil
@@ -233,15 +241,15 @@ func (m Model) updateMainKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.alignSidebarCursor()
 			return m, nil
 		}
-		if keyMatches(msg, m.keys.Up) || msg.Keystroke() == "ctrl+p" {
+		if keyMatches(msg, m.keys.Up) || msg.String() == "ctrl+p" {
 			m.moveSidebar(-1)
 			return m, nil
 		}
-		if keyMatches(msg, m.keys.Down) || msg.Keystroke() == "ctrl+n" {
+		if keyMatches(msg, m.keys.Down) || msg.String() == "ctrl+n" {
 			m.moveSidebar(1)
 			return m, nil
 		}
-		switch msg.Keystroke() {
+		switch msg.String() {
 		case "escape":
 			m.sidebar.Finding = false
 			m.sidebar.Query.Blur()
@@ -307,15 +315,15 @@ func (m Model) updateMainKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	switch m.focus {
 	case ui.FocusSidebar:
-		if keyMatches(msg, m.keys.Up) || msg.Keystroke() == "k" {
+		if keyMatches(msg, m.keys.Up) || msg.String() == "k" {
 			m.moveSidebar(-1)
 			return m, nil
 		}
-		if keyMatches(msg, m.keys.Down) || msg.Keystroke() == "j" {
+		if keyMatches(msg, m.keys.Down) || msg.String() == "j" {
 			m.moveSidebar(1)
 			return m, nil
 		}
-		switch msg.Keystroke() {
+		switch msg.String() {
 		case "enter", "return":
 			if selected := m.selectedConversation(); selected != nil {
 				m.focus = ui.FocusChat
@@ -326,7 +334,7 @@ func (m Model) updateMainKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case ui.FocusChat:
-		if keyMatches(msg, m.keys.Up) || msg.Keystroke() == "k" {
+		if keyMatches(msg, m.keys.Up) || msg.String() == "k" {
 			m.moveMessageSelection(-1)
 			m.chat.Viewport.ScrollUp(2)
 			if m.chat.Viewport.AtTop() && m.chat.HasOlder && !m.chat.LoadingOlder {
@@ -334,7 +342,7 @@ func (m Model) updateMainKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		if keyMatches(msg, m.keys.Down) || msg.Keystroke() == "j" {
+		if keyMatches(msg, m.keys.Down) || msg.String() == "j" {
 			m.moveMessageSelection(1)
 			m.chat.Viewport.ScrollDown(2)
 			if m.chat.Viewport.AtBottom() {
@@ -342,7 +350,7 @@ func (m Model) updateMainKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		switch msg.Keystroke() {
+		switch msg.String() {
 		case "pageup":
 			m.chat.Viewport.PageUp()
 			if m.chat.Viewport.AtTop() && m.chat.HasOlder && !m.chat.LoadingOlder {
