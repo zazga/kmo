@@ -31,7 +31,7 @@ func NewSidebar() Sidebar {
 	q.Placeholder = "find..."
 	q.Prompt = "/ "
 	q.CharLimit = 120
-	return Sidebar{Query: q, Width: 30}
+	return Sidebar{Query: q, Width: 50}
 }
 
 type Chat struct {
