@@ -233,10 +233,14 @@ func (m Model) updateMainKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.sidebar.ApplyFilter(m.conversations)
 			m.alignSidebarCursor()
 			return m, nil
-		case "enter":
+		case "enter", "return":
 			if selected := m.selectedConversation(); selected != nil {
 				m.sidebar.Finding = false
 				m.sidebar.Query.Blur()
+				m.sidebar.Query.SetValue("")
+				m.sidebar.ApplyFilter(m.conversations)
+				m.focus = ui.FocusChat
+				m.applyFocus()
 				return m.openConversation(selected)
 			}
 			return m, nil
@@ -298,8 +302,10 @@ func (m Model) updateMainKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.moveSidebar(-1)
 		case "down", "j":
 			m.moveSidebar(1)
-		case "enter":
+		case "enter", "return":
 			if selected := m.selectedConversation(); selected != nil {
+				m.focus = ui.FocusChat
+				m.applyFocus()
 				return m.openConversation(selected)
 			}
 		}

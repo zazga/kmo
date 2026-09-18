@@ -68,7 +68,7 @@ func normalizeKeystroke(key string) string {
 
 	// Terminals commonly report '?' as Shift+/ and may order modifiers
 	// differently (super+shift+/ vs shift+super+/). Canonicalize both forms.
-	if base == "/" && containsString(mods, "shift") {
+	if (base == "/" || base == "?") && containsString(mods, "shift") {
 		base = "?"
 		mods = removeString(mods, "shift")
 	}

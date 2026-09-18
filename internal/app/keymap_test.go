@@ -35,3 +35,10 @@ func TestCommandQuestionMarkPortableFallback(t *testing.T) {
 		t.Fatal("expected ctrl+shift+/ fallback to match cmd+?")
 	}
 }
+
+func TestCommandQuestionMarkWithShiftedQuestionMark(t *testing.T) {
+	msg := tea.KeyPressMsg(tea.Key{Code: '?', Mod: tea.ModSuper | tea.ModShift})
+	if !keyMatches(msg, "cmd+?") {
+		t.Fatal("expected cmd+shift+? terminal form to match cmd+?")
+	}
+}
