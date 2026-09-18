@@ -1,0 +1,24 @@
+name: temporary-sidebar-verify
+on:
+  push:
+    branches: [feature/mattermost-tui-v1]
+permissions:
+  contents: read
+concurrency:
+  group: kmo-sidebar-verify
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Unit tests
+        run: go test ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Build macOS arm64
+        run: make build
