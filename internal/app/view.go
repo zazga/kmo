@@ -36,9 +36,6 @@ func (m Model) View() tea.View {
 	v := tea.NewView(content)
 	v.AltScreen = true
 	v.WindowTitle = "KMO — Mattermost"
-	v.KeyboardEnhancements.ReportAlternateKeys = true
-	v.KeyboardEnhancements.ReportAllKeysAsEscapeCodes = true
-	v.KeyboardEnhancements.ReportAssociatedText = true
 	return v
 }
 
