@@ -2,6 +2,9 @@ name: temporary-v1-verify
 on:
   push:
     branches: [feature/mattermost-tui-v1]
+concurrency:
+  group: kmo-v1-verify
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
