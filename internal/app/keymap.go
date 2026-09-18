@@ -15,17 +15,31 @@ type keymap struct {
 	Reply         string
 	Send          string
 	Shortcuts     string
+	Quit          string
 	Cancel        string
 	Up            string
 	Down          string
 }
 
 func newKeymap(cfg config.Keybindings) keymap {
-	return keymap{FocusNext: cfg.FocusNext, FocusPrevious: cfg.FocusPrevious, Find: cfg.Find, Reply: cfg.Reply, Send: cfg.Send, Shortcuts: cfg.Shortcuts, Cancel: cfg.Cancel, Up: cfg.Up, Down: cfg.Down}
+	return keymap{
+		FocusNext:     cfg.FocusNext,
+		FocusPrevious: cfg.FocusPrevious,
+		Find:          cfg.Find,
+		Reply:         cfg.Reply,
+		Send:          cfg.Send,
+		Shortcuts:     cfg.Shortcuts,
+		Quit:          cfg.Quit,
+		Cancel:        cfg.Cancel,
+		Up:            cfg.Up,
+		Down:          cfg.Down,
+	}
 }
 
 func keyMatches(msg tea.KeyPressMsg, binding string) bool {
-	got := normalizeKeystroke(msg.Keystroke())
+	// Bubble Tea v2's public key matching examples use String(). In real
+	// terminals this is the canonical representation for arrows/modifiers.
+	got := normalizeKeystroke(msg.String())
 	want := normalizeBinding(binding)
 	if got == want {
 		return true
@@ -66,8 +80,6 @@ func normalizeKeystroke(key string) string {
 	base := parts[len(parts)-1]
 	mods := append([]string(nil), parts[:len(parts)-1]...)
 
-	// Terminals commonly report '?' as Shift+/ and may order modifiers
-	// differently (super+shift+/ vs shift+super+/). Canonicalize both forms.
 	if (base == "/" || base == "?") && containsString(mods, "shift") {
 		base = "?"
 		mods = removeString(mods, "shift")
