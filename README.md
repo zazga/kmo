@@ -22,6 +22,7 @@ See `DESIGN.md`, `ARCHITECTURE.md`, and `IMPLEMENTATION.md` for the agreed v1 de
 - macOS on Apple Silicon (arm64).
 - Go 1.25 or newer to build from source.
 - A Mattermost Personal Access Token.
+- A terminal window of at least 72×16 cells for the mandatory two-column layout.
 
 ## Build and install
 
