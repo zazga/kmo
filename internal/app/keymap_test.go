@@ -42,3 +42,12 @@ func TestCommandQuestionMarkWithShiftedQuestionMark(t *testing.T) {
 		t.Fatal("expected cmd+shift+? terminal form to match cmd+?")
 	}
 }
+
+func TestArrowBindingsMatchDefaults(t *testing.T) {
+	if !keyMatches(tea.KeyPressMsg(tea.Key{Code: tea.KeyUp}), "up") {
+		t.Fatal("expected up arrow to match up binding")
+	}
+	if !keyMatches(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}), "down") {
+		t.Fatal("expected down arrow to match down binding")
+	}
+}

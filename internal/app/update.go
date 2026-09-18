@@ -225,6 +225,22 @@ func (m Model) updateMainKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if m.sidebar.Finding {
+		if keyMatches(msg, m.keys.Cancel) {
+			m.sidebar.Finding = false
+			m.sidebar.Query.Blur()
+			m.sidebar.Query.SetValue("")
+			m.sidebar.ApplyFilter(m.conversations)
+			m.alignSidebarCursor()
+			return m, nil
+		}
+		if keyMatches(msg, m.keys.Up) || msg.Keystroke() == "ctrl+p" {
+			m.moveSidebar(-1)
+			return m, nil
+		}
+		if keyMatches(msg, m.keys.Down) || msg.Keystroke() == "ctrl+n" {
+			m.moveSidebar(1)
+			return m, nil
+		}
 		switch msg.Keystroke() {
 		case "escape":
 			m.sidebar.Finding = false
@@ -243,12 +259,6 @@ func (m Model) updateMainKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.applyFocus()
 				return m.openConversation(selected)
 			}
-			return m, nil
-		case "up", "ctrl+p":
-			m.moveSidebar(-1)
-			return m, nil
-		case "down", "ctrl+n":
-			m.moveSidebar(1)
 			return m, nil
 		}
 		var cmd tea.Cmd
@@ -297,11 +307,15 @@ func (m Model) updateMainKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	switch m.focus {
 	case ui.FocusSidebar:
-		switch msg.Keystroke() {
-		case "up", "k":
+		if keyMatches(msg, m.keys.Up) || msg.Keystroke() == "k" {
 			m.moveSidebar(-1)
-		case "down", "j":
+			return m, nil
+		}
+		if keyMatches(msg, m.keys.Down) || msg.Keystroke() == "j" {
 			m.moveSidebar(1)
+			return m, nil
+		}
+		switch msg.Keystroke() {
 		case "enter", "return":
 			if selected := m.selectedConversation(); selected != nil {
 				m.focus = ui.FocusChat
@@ -312,19 +326,23 @@ func (m Model) updateMainKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case ui.FocusChat:
-		switch msg.Keystroke() {
-		case "up", "k":
+		if keyMatches(msg, m.keys.Up) || msg.Keystroke() == "k" {
 			m.moveMessageSelection(-1)
 			m.chat.Viewport.ScrollUp(2)
 			if m.chat.Viewport.AtTop() && m.chat.HasOlder && !m.chat.LoadingOlder {
 				return m, m.loadOlder()
 			}
-		case "down", "j":
+			return m, nil
+		}
+		if keyMatches(msg, m.keys.Down) || msg.Keystroke() == "j" {
 			m.moveMessageSelection(1)
 			m.chat.Viewport.ScrollDown(2)
 			if m.chat.Viewport.AtBottom() {
 				m.chat.NewMessages = false
 			}
+			return m, nil
+		}
+		switch msg.Keystroke() {
 		case "pageup":
 			m.chat.Viewport.PageUp()
 			if m.chat.Viewport.AtTop() && m.chat.HasOlder && !m.chat.LoadingOlder {

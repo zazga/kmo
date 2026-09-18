@@ -35,8 +35,8 @@ type Config struct {
 
 func Defaults() Config {
 	return Config{Keybindings: Keybindings{
-		FocusNext: "tab", FocusPrevious: "cmd+tab", Find: "cmd+f",
-		Reply: "cmd+r", Send: "cmd+enter", Shortcuts: "cmd+?",
+		FocusNext: "tab", FocusPrevious: "ctrl+tab", Find: "ctrl+f",
+		Reply: "ctrl+r", Send: "ctrl+enter", Shortcuts: "ctrl+h",
 		Cancel: "esc", Up: "up", Down: "down",
 	}}
 }
@@ -88,7 +88,11 @@ func LoadFrom(path string) (Config, []error, error) {
 	validate("down", &cfg.Keybindings.Down, defaults.Down)
 
 	seen := map[string]string{}
-	type bindingRef struct{ name string; value *string; fallback string }
+	type bindingRef struct {
+		name     string
+		value    *string
+		fallback string
+	}
 	bindings := []bindingRef{
 		{"focus_next", &cfg.Keybindings.FocusNext, defaults.FocusNext},
 		{"focus_previous", &cfg.Keybindings.FocusPrevious, defaults.FocusPrevious},
@@ -115,7 +119,9 @@ func LoadFrom(path string) (Config, []error, error) {
 
 func Save(cfg Config) error {
 	path, err := Path()
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	return SaveTo(path, cfg)
 }
 
@@ -125,9 +131,13 @@ func SaveTo(path string, cfg Config) error {
 		return fmt.Errorf("create config directory: %w", err)
 	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
-	if err != nil { return fmt.Errorf("open config: %w", err) }
+	if err != nil {
+		return fmt.Errorf("open config: %w", err)
+	}
 	defer f.Close()
-	if err := toml.NewEncoder(f).Encode(cfg); err != nil { return fmt.Errorf("encode config: %w", err) }
+	if err := toml.NewEncoder(f).Encode(cfg); err != nil {
+		return fmt.Errorf("encode config: %w", err)
+	}
 	return nil
 }
 
@@ -137,15 +147,21 @@ func (c Config) Complete() bool {
 
 func ValidBinding(s string) bool {
 	s = strings.ToLower(strings.TrimSpace(s))
-	if s == "" { return false }
+	if s == "" {
+		return false
+	}
 	parts := strings.Split(s, "+")
 	base := parts[len(parts)-1]
-	if base == "" { return false }
+	if base == "" {
+		return false
+	}
 	seenMods := map[string]bool{}
 	for _, mod := range parts[:len(parts)-1] {
 		switch mod {
 		case "cmd", "super", "ctrl", "alt", "shift", "meta", "hyper":
-			if seenMods[mod] { return false }
+			if seenMods[mod] {
+				return false
+			}
 			seenMods[mod] = true
 		default:
 			return false
@@ -158,13 +174,22 @@ func ValidBinding(s string) bool {
 		"home": true, "end": true, "pageup": true, "pagedown": true,
 		"pgup": true, "pgdown": true,
 	}
-	if named[base] { return true }
+	if named[base] {
+		return true
+	}
 	return len([]rune(base)) == 1
 }
 
 func bindingIdentity(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))
 	s = strings.ReplaceAll(s, "cmd+", "super+")
-	switch s { case "esc": return "escape"; case "pgup": return "pageup"; case "pgdown": return "pagedown" }
+	switch s {
+	case "esc":
+		return "escape"
+	case "pgup":
+		return "pageup"
+	case "pgdown":
+		return "pagedown"
+	}
 	return s
 }
