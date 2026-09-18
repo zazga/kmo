@@ -91,7 +91,12 @@ func NewSetup(initialURL, initialPAT string) Setup {
 }
 
 func (s *Sidebar) ApplyFilter(all []*mm.Conversation) {
-	query := strings.TrimSpace(strings.ToLower(s.Query.Value()))
+	query := ""
+	if s.Finding {
+		query = strings.TrimSpace(strings.ToLower(s.Query.Value()))
+	} else if s.Query.Value() != "" {
+		s.Query.SetValue("")
+	}
 	if query == "" {
 		s.Filtered = append(s.Filtered[:0], all...)
 	} else {
@@ -132,9 +137,6 @@ func FuzzyMatch(candidate, query string) bool {
 		return true
 	}
 
-	// Typo-tolerant matching is deliberately conservative: compare the query
-	// against individual visible-name/username tokens and allow one typo for
-	// short names, two for longer names.
 	maxDistance := 1
 	if len([]rune(query)) >= 7 {
 		maxDistance = 2
@@ -142,10 +144,7 @@ func FuzzyMatch(candidate, query string) bool {
 	for _, token := range strings.FieldsFunc(candidate, func(r rune) bool {
 		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
 	}) {
-		if token == "" {
-			continue
-		}
-		if levenshteinWithin(token, query, maxDistance) {
+		if token != "" && levenshteinWithin(token, query, maxDistance) {
 			return true
 		}
 	}
@@ -184,11 +183,7 @@ func levenshteinWithin(a, b string, maxDistance int) bool {
 			if ar[i-1] != br[j-1] {
 				cost = 1
 			}
-			curr[j] = minInt(
-				curr[j-1]+1,
-				prev[j]+1,
-				prev[j-1]+cost,
-			)
+			curr[j] = minInt(curr[j-1]+1, prev[j]+1, prev[j-1]+cost)
 			if curr[j] < rowMin {
 				rowMin = curr[j]
 			}
