@@ -1,0 +1,36 @@
+name: temporary-fix-go-mod
+on:
+  push:
+    branches: [feature/mattermost-tui-v1]
+permissions:
+  contents: write
+concurrency:
+  group: kmo-fix-go-mod
+  cancel-in-progress: true
+jobs:
+  fix:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Tidy modules
+        run: go mod tidy
+      - name: Commit module files if changed
+        run: |
+          if ! git diff --quiet -- go.mod go.sum || [ -n "$(git ls-files --others --exclude-standard go.mod go.sum)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add go.mod go.sum
+            git commit -m "Tidy Go module metadata"
+            git push
+            exit 0
+          fi
+      - name: Unit tests
+        run: go test ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Build macOS arm64
+        run: make build
