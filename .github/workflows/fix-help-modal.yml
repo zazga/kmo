@@ -20,11 +20,7 @@ jobs:
           p = Path('internal/app/view.go')
           s = p.read_text()
           old = 'return lipgloss.JoinVertical(lipgloss.Center, box, "", background)'
-          new = '''w, h := m.width, m.height
-	if w <= 0 { w = 80 }
-	if h <= 0 { h = 24 }
-	_ = background
-	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, box)'''
+          new = 'w, h := m.width, m.height\n\tif w <= 0 {\n\t\tw = 80\n\t}\n\tif h <= 0 {\n\t\th = 24\n\t}\n\t_ = background\n\treturn lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, box)'
           if old not in s:
               raise SystemExit('help view replacement target not found')
           p.write_text(s.replace(old, new, 1))
