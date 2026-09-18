@@ -63,5 +63,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add internal/mattermost/service.go internal/mattermost/service_test.go
-          git commit -m "Fix stale unread indicators" || exit 0
+          git commit -m "Fix stale unread indicators"
+          git pull --rebase origin feature/mattermost-tui-v1
           git push
