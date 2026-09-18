@@ -1,0 +1,82 @@
+name: temporary-quit-arrow-verify
+on:
+  push:
+    branches: [feature/mattermost-tui-v1]
+permissions:
+  contents: write
+concurrency:
+  group: kmo-quit-arrow-verify
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Patch quit handling and help
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('internal/app/update.go')
+          s = p.read_text()
+          old = '''func (m Model) updateMainKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {\n\tif m.showHelp {'''
+          new = '''func (m Model) updateMainKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {\n\tif keyMatches(msg, m.keys.Quit) {\n\t\tm.cancel()\n\t\tif m.service != nil {\n\t\t\tm.service.Close()\n\t\t}\n\t\treturn m, tea.Quit\n\t}\n\n\tif m.showHelp {'''
+          if old not in s:
+              raise SystemExit('updateMainKey target not found')
+          s = s.replace(old, new, 1)
+          # Use Bubble Tea's canonical String() consistently for direct checks too.
+          s = s.replace('msg.Keystroke()', 'msg.String()')
+          p.write_text(s)
+
+          p = Path('internal/app/view.go')
+          s = p.read_text()
+          old = '''\t\tfmt.Sprintf("%-16s %s", m.keys.Shortcuts, "shortcuts"),'''
+          if old in s:
+              new = old + '''\n\t\tfmt.Sprintf("%-16s %s", m.keys.Quit, "quit KMO"),'''
+              s = s.replace(old, new, 1)
+          else:
+              marker = '''\t\tfmt.Sprintf("%-16s %s", m.keys.FocusPrevious, "previous pane"),'''
+              if marker not in s:
+                  raise SystemExit('help marker not found')
+              s = s.replace(marker, marker + '''\n\t\tfmt.Sprintf("%-16s %s", m.keys.Quit, "quit KMO"),''', 1)
+          p.write_text(s)
+          PY
+          gofmt -w internal/app/update.go internal/app/view.go
+      - name: Add regression tests
+        run: |
+          cat >> internal/app/keymap_test.go <<'EOF'
+
+          func TestCtrlQMatchesQuitBinding(t *testing.T) {
+              if !keyMatches(tea.KeyPressMsg(tea.Key{Code: 'q', Mod: tea.ModCtrl}), "ctrl+q") {
+                  t.Fatal("expected ctrl+q to match quit binding")
+              }
+          }
+          EOF
+          cat >> internal/config/config_test.go <<'EOF'
+
+          func TestCtrlDefaults(t *testing.T) {
+              cfg := Defaults()
+              if cfg.Keybindings.Find != "ctrl+f" || cfg.Keybindings.Send != "ctrl+enter" || cfg.Keybindings.Shortcuts != "ctrl+h" || cfg.Keybindings.Quit != "ctrl+q" {
+                  t.Fatalf("unexpected ctrl defaults: %#v", cfg.Keybindings)
+              }
+          }
+          EOF
+          gofmt -w internal/app/keymap_test.go internal/config/config_test.go
+      - name: Verify
+        run: |
+          go test ./...
+          go vet ./...
+          make build
+      - name: Commit verified changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add internal/app/update.go internal/app/view.go internal/app/keymap_test.go internal/config/config_test.go
+          if ! git diff --cached --quiet; then
+            git commit -m "Add Ctrl-Q quit and fix physical arrow handling"
+            git push
+          fi
