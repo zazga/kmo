@@ -1,0 +1,18 @@
+name: temporary-keyboard-compat-verify
+on:
+  push:
+    branches: [feature/mattermost-tui-v1]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go test ./...
+      - run: go vet ./...
+      - run: make build
