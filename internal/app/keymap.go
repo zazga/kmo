@@ -22,23 +22,10 @@ type keymap struct {
 }
 
 func newKeymap(cfg config.Keybindings) keymap {
-	return keymap{
-		FocusNext:     cfg.FocusNext,
-		FocusPrevious: cfg.FocusPrevious,
-		Find:          cfg.Find,
-		Reply:         cfg.Reply,
-		Send:          cfg.Send,
-		Shortcuts:     cfg.Shortcuts,
-		Quit:          cfg.Quit,
-		Cancel:        cfg.Cancel,
-		Up:            cfg.Up,
-		Down:          cfg.Down,
-	}
+	return keymap{FocusNext: cfg.FocusNext, FocusPrevious: cfg.FocusPrevious, Find: cfg.Find, Reply: cfg.Reply, Send: cfg.Send, Shortcuts: cfg.Shortcuts, Quit: cfg.Quit, Cancel: cfg.Cancel, Up: cfg.Up, Down: cfg.Down}
 }
 
 func keyMatches(msg tea.KeyPressMsg, binding string) bool {
-	// Bubble Tea v2's public key matching examples use String(). In real
-	// terminals this is the canonical representation for arrows/modifiers.
 	got := normalizeKeystroke(msg.String())
 	want := normalizeBinding(binding)
 	if got == want {
@@ -54,6 +41,16 @@ func keyMatches(msg tea.KeyPressMsg, binding string) bool {
 		}
 	}
 	return false
+}
+
+func isUpKey(msg tea.KeyPressMsg, binding string) bool {
+	key := msg.Key()
+	return key.Code == tea.KeyUp || key.Code == tea.KeyKpUp || keyMatches(msg, binding)
+}
+
+func isDownKey(msg tea.KeyPressMsg, binding string) bool {
+	key := msg.Key()
+	return key.Code == tea.KeyDown || key.Code == tea.KeyKpDown || keyMatches(msg, binding)
 }
 
 func normalizeBinding(binding string) string {
