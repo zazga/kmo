@@ -22,6 +22,7 @@ type Keybindings struct {
 	Reply         string `toml:"reply"`
 	Send          string `toml:"send"`
 	Shortcuts     string `toml:"shortcuts"`
+	Quit          string `toml:"quit"`
 	Cancel        string `toml:"cancel"`
 	Up            string `toml:"up"`
 	Down          string `toml:"down"`
@@ -36,7 +37,7 @@ type Config struct {
 func Defaults() Config {
 	return Config{Keybindings: Keybindings{
 		FocusNext: "tab", FocusPrevious: "ctrl+tab", Find: "ctrl+f",
-		Reply: "ctrl+r", Send: "ctrl+enter", Shortcuts: "ctrl+h",
+		Reply: "ctrl+r", Send: "ctrl+enter", Shortcuts: "ctrl+h", Quit: "ctrl+q",
 		Cancel: "esc", Up: "up", Down: "down",
 	}}
 }
@@ -83,6 +84,7 @@ func LoadFrom(path string) (Config, []error, error) {
 	validate("reply", &cfg.Keybindings.Reply, defaults.Reply)
 	validate("send", &cfg.Keybindings.Send, defaults.Send)
 	validate("shortcuts", &cfg.Keybindings.Shortcuts, defaults.Shortcuts)
+	validate("quit", &cfg.Keybindings.Quit, defaults.Quit)
 	validate("cancel", &cfg.Keybindings.Cancel, defaults.Cancel)
 	validate("up", &cfg.Keybindings.Up, defaults.Up)
 	validate("down", &cfg.Keybindings.Down, defaults.Down)
@@ -100,6 +102,7 @@ func LoadFrom(path string) (Config, []error, error) {
 		{"reply", &cfg.Keybindings.Reply, defaults.Reply},
 		{"send", &cfg.Keybindings.Send, defaults.Send},
 		{"shortcuts", &cfg.Keybindings.Shortcuts, defaults.Shortcuts},
+		{"quit", &cfg.Keybindings.Quit, defaults.Quit},
 		{"cancel", &cfg.Keybindings.Cancel, defaults.Cancel},
 		{"up", &cfg.Keybindings.Up, defaults.Up},
 		{"down", &cfg.Keybindings.Down, defaults.Down},
