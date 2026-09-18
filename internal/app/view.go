@@ -206,7 +206,15 @@ func (m Model) viewHelp(background string) string {
 		"Press shortcut, Esc or Enter to close",
 	}
 	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(accent).Padding(1, 2).Render(strings.Join(lines, "\n"))
-	return lipgloss.JoinVertical(lipgloss.Center, box, "", background)
+	w, h := m.width, m.height
+	if w <= 0 {
+		w = 80
+	}
+	if h <= 0 {
+		h = 24
+	}
+	_ = background
+	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, box)
 }
 
 func (m Model) centered(s string) string {
