@@ -59,8 +59,8 @@ func (m Model) viewSetup() string {
 }
 
 func (m Model) viewMain() string {
-	if m.width > 0 && (m.width < 72 || m.height < 16) {
-		return m.centered("KMO needs at least 72×16 terminal cells.")
+	if m.width > 0 && (m.width < 73 || m.height < 16) {
+		return m.centered("KMO needs at least 73×16 terminal cells.")
 	}
 	left := m.viewSidebar()
 	right := m.viewChatPane()
@@ -80,6 +80,8 @@ func (m Model) viewSidebar() string {
 		b.WriteString("\n")
 	}
 
+	lines := make([]string, 0, len(m.sidebar.Filtered)+6)
+	selectedLine := -1
 	currentKind := mm.ConversationKind(-1)
 	for i, c := range m.sidebar.Filtered {
 		if c == nil || c.Channel == nil {
@@ -87,11 +89,10 @@ func (m Model) viewSidebar() string {
 		}
 		if c.Kind != currentKind {
 			currentKind = c.Kind
-			if i > 0 {
-				b.WriteString("\n")
+			if len(lines) > 0 {
+				lines = append(lines, "")
 			}
-			b.WriteString(titleStyle.Render(sectionName(c.Kind)))
-			b.WriteString("\n")
+			lines = append(lines, titleStyle.Render(sectionName(c.Kind)))
 		}
 		marker := "  "
 		if c.Mention {
@@ -99,29 +100,51 @@ func (m Model) viewSidebar() string {
 		} else if c.Unread {
 			marker = "• "
 		}
-		name := truncateName(c.Display, 25)
+		name := truncateName(c.Display, max(10, m.sidebar.Width-4))
 		line := marker + name
 		if i == m.sidebar.Cursor {
+			selectedLine = len(lines)
 			line = lipgloss.NewStyle().Foreground(accent).Bold(true).Render("› " + line)
 		} else {
 			line = "  " + line
 		}
-		b.WriteString(line)
-		b.WriteString("\n")
+		lines = append(lines, line)
 	}
 	if len(m.sidebar.Filtered) == 0 {
-		b.WriteString("  No matches\n")
+		lines = append(lines, "  No matches")
 	}
 
-	style := lipgloss.NewStyle().Width(30).Height(max(1, m.height-3)).BorderRight(true).BorderStyle(lipgloss.NormalBorder()).BorderForeground(borderColor).Padding(0, 1)
+	visibleRows := max(1, m.height-4)
+	start := sidebarWindowStart(selectedLine, len(lines), visibleRows)
+	end := min(len(lines), start+visibleRows)
+	if start < end {
+		b.WriteString(strings.Join(lines[start:end], "\n"))
+	}
+
+	style := lipgloss.NewStyle().Width(m.sidebar.Width).Height(max(1, m.height-3)).BorderRight(true).BorderStyle(lipgloss.NormalBorder()).BorderForeground(borderColor).Padding(0, 1)
 	if m.focus == ui.FocusSidebar {
 		style = style.BorderForeground(accent)
 	}
 	return style.Render(strings.TrimRight(b.String(), "\n"))
 }
 
+func sidebarWindowStart(selectedLine, totalLines, visibleRows int) int {
+	if totalLines <= 0 || visibleRows <= 0 || totalLines <= visibleRows || selectedLine < 0 {
+		return 0
+	}
+	start := selectedLine - visibleRows + 1
+	if start < 0 {
+		return 0
+	}
+	maxStart := totalLines - visibleRows
+	if start > maxStart {
+		return maxStart
+	}
+	return start
+}
+
 func (m Model) viewChatPane() string {
-	width := max(20, m.width-33)
+	width := max(20, m.width-(m.sidebar.Width+3))
 	header := "No conversation"
 	if m.active != nil {
 		header = conversationHeader(m.active)
