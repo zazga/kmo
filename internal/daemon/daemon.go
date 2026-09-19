@@ -12,9 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/zazga/kmo/internal/config"
-	"github.com/zazga/kmo/internal/keychain"
 	mm "github.com/zazga/kmo/internal/mattermost"
 	tg "github.com/zazga/kmo/internal/telegram"
 )
@@ -52,10 +50,17 @@ func Run(ctx context.Context, cfg config.Config, mattermostToken, telegramToken 
 	}
 
 	if cfg.Telegram.Enabled {
-		if cfg.Telegram.ChatID == 0 || strings.TrimSpace(telegramToken) == "" {
+		if cfg.Telegram.ChatID == 0 || strings.TrimSpace(telegramToken) == "" || strings.TrimSpace(mattermostToken) == "" || !cfg.Complete() {
 			hub.setTelegram("unavailable")
 		} else {
-			go forwardingSupervisor(ctx, cfg, mattermostToken, telegramToken, hub, infoLog, errLog)
+			state, err := tg.LoadState()
+			if err != nil {
+				return err
+			}
+			client := tg.New(telegramToken)
+			go telegramReplyLoop(ctx, cfg, mattermostToken, client, state, hub, infoLog, errLog)
+			go mattermostForwardLoop(ctx, cfg, mattermostToken, client, state, hub, infoLog, errLog)
+			go stateCleanupLoop(ctx, state, errLog)
 		}
 	}
 
@@ -73,53 +78,101 @@ func telegramInitialStatus(cfg config.Config) string {
 func alwaysOnlineLoop(ctx context.Context, serverURL, token string, hub *statusHub, infoLog, errLog *slog.Logger) {
 	svc := mm.New(serverURL, token, infoLog, errLog)
 	defer svc.Close()
+	if err := retryOperation(ctx, hub.setMattermost, func() error { return svc.SetOnline(ctx) }); err == nil {
+		hub.setMattermost("connected")
+	}
 	ticker := time.NewTicker(onlineInterval)
 	defer ticker.Stop()
 	for {
-		if err := retryOperation(ctx, hub.setMattermost, func() error { return svc.SetOnline(ctx) }); err == nil {
-			hub.setMattermost("connected")
-		}
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if err := retryOperation(ctx, hub.setMattermost, func() error { return svc.SetOnline(ctx) }); err == nil {
+				hub.setMattermost("connected")
+			}
 		}
 	}
 }
 
-func forwardingSupervisor(ctx context.Context, cfg config.Config, mmToken, tgToken string, hub *statusHub, infoLog, errLog *slog.Logger) {
-	for {
+func telegramReplyLoop(ctx context.Context, cfg config.Config, mmToken string, client *tg.Client, state *tg.State, hub *statusHub, infoLog, errLog *slog.Logger) {
+	replySvc := mm.New(cfg.ServerURL, mmToken, infoLog, errLog)
+	defer replySvc.Close()
+	delays := []time.Duration{time.Second, 2 * time.Second, 5 * time.Second, 10 * time.Second, 30 * time.Second}
+	attempt := 0
+	for ctx.Err() == nil {
+		hub.setTelegram("reconnecting")
+		err := runTelegramPollSession(ctx, cfg.Telegram.ChatID, client, replySvc, state, hub, errLog)
 		if ctx.Err() != nil {
 			return
 		}
-		hub.setTelegram("reconnecting")
-		if err := runForwardingSession(ctx, cfg, mmToken, tgToken, hub, infoLog, errLog); err != nil && errLog != nil {
-			errLog.Warn("forwarding session ended", "component", "daemon", "error", err)
-		}
-		hub.setTelegram("unavailable")
-		if !sleepContext(ctx, cooldownInterval) {
+		if err != nil && isTelegramAuthError(err) {
+			disableTelegram(errLog)
+			hub.setTelegram("disabled")
+			if errLog != nil {
+				errLog.Error("Telegram token rejected; forwarding disabled", "component", "telegram", "error", err)
+			}
 			return
 		}
+		if err != nil && errLog != nil {
+			errLog.Warn("Telegram polling disconnected", "component", "telegram", "error", err)
+		}
+		if attempt < len(delays) {
+			d := delays[attempt]
+			attempt++
+			if !sleepContext(ctx, d) { return }
+			continue
+		}
+		hub.setTelegram("unavailable")
+		if !sleepContext(ctx, cooldownInterval) { return }
+		attempt = 0
 	}
 }
 
-func runForwardingSession(ctx context.Context, cfg config.Config, mmToken, tgToken string, hub *statusHub, infoLog, errLog *slog.Logger) error {
-	telegram := tg.New(tgToken)
-	if _, err := telegram.GetMe(ctx); err != nil {
-		if isTelegramAuthError(err) {
-			disableTelegram(errLog)
-			hub.setTelegram("disabled")
-			return fmt.Errorf("Telegram token rejected: %w", err)
+func runTelegramPollSession(ctx context.Context, chatID int64, client *tg.Client, replySvc *mm.Service, state *tg.State, hub *statusHub, errLog *slog.Logger) error {
+	if _, err := client.GetMe(ctx); err != nil {
+		return err
+	}
+	hub.setTelegram("connected")
+	for ctx.Err() == nil {
+		updates, err := client.GetUpdates(ctx, state.Offset(), 50)
+		if err != nil {
+			return err
 		}
-		return err
+		for _, up := range updates {
+			handleTelegramReply(ctx, client, replySvc, state, chatID, up, errLog)
+			if err := state.AdvanceUpdate(up.UpdateID); err != nil && errLog != nil {
+				errLog.Warn("persist Telegram update offset failed", "component", "telegram", "error", err)
+			}
+		}
 	}
-	state, err := tg.LoadState()
-	if err != nil {
-		return err
+	return ctx.Err()
+}
+
+func mattermostForwardLoop(ctx context.Context, cfg config.Config, mmToken string, client *tg.Client, state *tg.State, hub *statusHub, infoLog, errLog *slog.Logger) {
+	delays := []time.Duration{time.Second, 2 * time.Second, 5 * time.Second, 10 * time.Second, 30 * time.Second}
+	attempt := 0
+	for ctx.Err() == nil {
+		err := runMattermostForwardSession(ctx, cfg, mmToken, client, state, hub, infoLog, errLog)
+		if ctx.Err() != nil { return }
+		if err != nil && errLog != nil {
+			errLog.Warn("Mattermost forwarding disconnected", "component", "mattermost", "error", err)
+		}
+		if attempt < len(delays) {
+			d := delays[attempt]
+			attempt++
+			if !sleepContext(ctx, d) { return }
+			continue
+		}
+		if !sleepContext(ctx, cooldownInterval) { return }
+		attempt = 0
 	}
-	mattermost := mm.New(cfg.ServerURL, mmToken, infoLog, errLog)
-	defer mattermost.Close()
-	session, err := mattermost.Bootstrap(ctx)
+}
+
+func runMattermostForwardSession(ctx context.Context, cfg config.Config, mmToken string, client *tg.Client, state *tg.State, hub *statusHub, infoLog, errLog *slog.Logger) error {
+	svc := mm.New(cfg.ServerURL, mmToken, infoLog, errLog)
+	defer svc.Close()
+	session, err := svc.Bootstrap(ctx)
 	if err != nil {
 		return err
 	}
@@ -129,34 +182,22 @@ func runForwardingSession(ctx context.Context, cfg config.Config, mmToken, tgTok
 			convs[c.Channel.Id] = c
 		}
 	}
-	mattermost.StartWebSocket(ctx)
-	hub.setTelegram("connected")
-
-	updates := make(chan tg.Update, 32)
-	errs := make(chan error, 2)
-	go telegramPollLoop(ctx, telegram, updates, errs)
-
-	for {
+	svc.StartWebSocket(ctx)
+	for ctx.Err() == nil {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case err := <-errs:
-			return err
-		case up := <-updates:
-			handleTelegramReply(ctx, telegram, mattermost, state, cfg.Telegram.ChatID, up, errLog)
-		case ev := <-mattermost.Events():
+		case ev := <-svc.Events():
 			switch ev.Kind {
-			case mm.EventOffline:
-				if ev.Err != nil {
-					return ev.Err
-				}
 			case mm.EventRefreshConversations:
-				items, loadErr := mattermost.LoadConversations(ctx, session.User, session.Team)
-				if loadErr == nil {
-					convs = map[string]*mm.Conversation{}
-					for _, c := range items {
-						if c != nil && c.Channel != nil { convs[c.Channel.Id] = c }
-					}
+				items, loadErr := svc.LoadConversations(ctx, session.User, session.Team)
+				if loadErr != nil {
+					if errLog != nil { errLog.Warn("refresh daemon conversations failed", "component", "mattermost", "error", loadErr) }
+					continue
+				}
+				convs = map[string]*mm.Conversation{}
+				for _, c := range items {
+					if c != nil && c.Channel != nil { convs[c.Channel.Id] = c }
 				}
 			case mm.EventPosted:
 				if ev.Post == nil || ev.Post.UserId == session.User.Id || strings.TrimSpace(ev.Post.Message) == "" {
@@ -167,13 +208,18 @@ func runForwardingSession(ctx context.Context, cfg config.Config, mmToken, tgTok
 					continue
 				}
 				header := fmt.Sprintf("%s · %s", conv.Display, time.UnixMilli(ev.Post.CreateAt).Local().Format("15:04"))
-				if ev.Post.RootId != "" {
-					header += " · reply"
-				}
+				if ev.Post.RootId != "" { header += " · reply" }
 				for _, part := range tg.SplitMessage(header, ev.Post.Message) {
-					msg, sendErr := telegram.SendMessage(ctx, cfg.Telegram.ChatID, part)
+					msg, sendErr := client.SendMessage(ctx, cfg.Telegram.ChatID, part)
 					if sendErr != nil {
-						return sendErr
+						if isTelegramAuthError(sendErr) {
+							disableTelegram(errLog)
+							hub.setTelegram("disabled")
+							return nil
+						}
+						hub.setTelegram("reconnecting")
+						if errLog != nil { errLog.Warn("forward DM to Telegram failed", "component", "telegram", "error", sendErr) }
+						continue
 					}
 					if err := state.Put(msg.MessageID, ev.Post.ChannelId, time.Now()); err != nil && errLog != nil {
 						errLog.Warn("persist Telegram mapping failed", "component", "telegram", "error", err)
@@ -182,22 +228,7 @@ func runForwardingSession(ctx context.Context, cfg config.Config, mmToken, tgTok
 			}
 		}
 	}
-}
-
-func telegramPollLoop(ctx context.Context, client *tg.Client, out chan<- tg.Update, errs chan<- error) {
-	var offset int64
-	for {
-		updates, err := client.GetUpdates(ctx, offset, 50)
-		if err != nil {
-			select { case errs <- err: default: }
-			return
-		}
-		for _, up := range updates {
-			if up.UpdateID >= offset { offset = up.UpdateID + 1 }
-			select { case out <- up: case <-ctx.Done(): return }
-		}
-		if ctx.Err() != nil { return }
-	}
+	return ctx.Err()
 }
 
 func handleTelegramReply(ctx context.Context, client *tg.Client, mattermost *mm.Service, state *tg.State, chatID int64, up tg.Update, errLog *slog.Logger) {
@@ -210,12 +241,24 @@ func handleTelegramReply(ctx context.Context, client *tg.Client, mattermost *mm.
 		_, _ = client.SendMessage(ctx, chatID, "Deze reply is verlopen.")
 		return
 	}
-	if !ok {
-		return
-	}
+	if !ok { return }
 	if _, err := mattermost.SendPost(ctx, channelID, msg.Text, ""); err != nil {
 		_, _ = client.SendMessage(ctx, chatID, "Kon bericht niet naar Mattermost sturen: "+err.Error())
 		if errLog != nil { errLog.Warn("Telegram reply send failed", "component", "telegram", "error", err) }
+	}
+}
+
+func stateCleanupLoop(ctx context.Context, state *tg.State, errLog *slog.Logger) {
+	t := time.NewTicker(6 * time.Hour)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done(): return
+		case <-t.C:
+			if err := state.Cleanup(time.Now()); err != nil && errLog != nil {
+				errLog.Warn("Telegram state cleanup failed", "component", "telegram", "error", err)
+			}
+		}
 	}
 }
 
@@ -237,7 +280,10 @@ func retryOperation(ctx context.Context, setStatus func(string), op func() error
 
 func disableTelegram(errLog *slog.Logger) {
 	cfg, _, err := config.Load()
-	if err != nil { return }
+	if err != nil {
+		if errLog != nil { errLog.Error("load config while disabling Telegram", "component", "telegram", "error", err) }
+		return
+	}
 	cfg.Telegram.Enabled = false
 	if err := config.Save(cfg); err != nil && errLog != nil {
 		errLog.Error("disable Telegram after auth failure", "component", "telegram", "error", err)
@@ -245,6 +291,7 @@ func disableTelegram(errLog *slog.Logger) {
 }
 
 func isTelegramAuthError(err error) bool {
+	if err == nil { return false }
 	s := strings.ToLower(err.Error())
 	return strings.Contains(s, "401") || strings.Contains(s, "unauthorized")
 }
@@ -280,8 +327,8 @@ func (h *statusHub) serve(ctx context.Context, errLog *slog.Logger) {
 	_ = os.Remove(path)
 	ln, err := net.Listen("unix", path)
 	if err != nil { if errLog != nil { errLog.Error("status socket listen failed", "component", "daemon", "error", err) }; return }
-	defer func(){ ln.Close(); os.Remove(path) }()
-	go func(){ <-ctx.Done(); ln.Close() }()
+	defer func(){ _ = ln.Close(); _ = os.Remove(path) }()
+	go func(){ <-ctx.Done(); _ = ln.Close() }()
 	for {
 		conn, err := ln.Accept(); if err != nil { return }
 		h.mu.Lock(); h.clients[conn] = struct{}{}; h.mu.Unlock()
@@ -297,8 +344,5 @@ func (h *statusHub) broadcast() {
 func (h *statusHub) write(c net.Conn) {
 	b, _ := json.Marshal(h.snapshot()); b = append(b, '\n')
 	_ = c.SetWriteDeadline(time.Now().Add(time.Second))
-	if _, err := c.Write(b); err != nil { h.mu.Lock(); delete(h.clients,c); h.mu.Unlock(); c.Close() }
+	if _, err := c.Write(b); err != nil { h.mu.Lock(); delete(h.clients,c); h.mu.Unlock(); _ = c.Close() }
 }
-
-var _ = model.StatusOnline
-var _ = keychain.Service
