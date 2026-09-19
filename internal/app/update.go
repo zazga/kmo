@@ -4,17 +4,24 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/zazga/kmo/internal/config"
 	"github.com/zazga/kmo/internal/keychain"
+	"github.com/zazga/kmo/internal/launchd"
 	mm "github.com/zazga/kmo/internal/mattermost"
+	tg "github.com/zazga/kmo/internal/telegram"
 	"github.com/zazga/kmo/internal/ui"
 )
 
-const historyPageSize = 60
+const (
+	historyPageSize    = 60
+	telegramPairWindow = 2 * time.Minute
+)
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
@@ -31,13 +38,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		ui.ApplyTheme(&m.sidebar, &m.compose, &m.setup, m.isDark)
 		return m, nil
 
+	case daemonStatusMsg:
+		if msg.status.Telegram != "" {
+			m.telegramConnection = msg.status.Telegram
+		}
+		return m, waitDaemonStatusCmd(m.daemonStatuses)
+
 	case bootstrapMsg:
 		if msg.err != nil {
 			m.errLog.Error("bootstrap failed", "component", "mattermost", "error", msg.err)
 			m.statusErr = msg.err.Error()
 			m.mode = modeSetup
 			token, _ := m.keychain.Get()
-			m.setup = ui.NewSetup(m.cfg.ServerURL, token)
+			telegramToken, _ := keychain.Telegram().Get()
+			m.setup = ui.NewSetup(m.cfg.ServerURL, token, m.cfg.Telegram.Enabled, telegramToken)
 			ui.ApplyTheme(&m.sidebar, &m.compose, &m.setup, m.isDark)
 			return m, nil
 		}
@@ -51,7 +65,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.service = msg.service
-		m.cfg.ServerURL = msg.url
+		m.cfg = msg.cfg
+		if m.cfg.Telegram.Enabled {
+			m.telegramConnection = "connecting"
+		} else {
+			m.telegramConnection = "disabled"
+		}
 		return m.enterMain(msg.session)
 
 	case messagesLoadedMsg:
@@ -158,10 +177,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	if m.mode == modeSetup {
 		var cmd tea.Cmd
-		if m.setup.Focus == 0 {
+		switch m.setup.Focus {
+		case 0:
 			m.setup.Server, cmd = m.setup.Server.Update(msg)
-		} else {
+		case 1:
 			m.setup.PAT, cmd = m.setup.PAT.Update(msg)
+		case 2:
+			m.setup.TelegramToken, cmd = m.setup.TelegramToken.Update(msg)
 		}
 		if cmd != nil {
 			cmds = append(cmds, cmd)
@@ -181,19 +203,33 @@ func (m Model) updateSetup(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.setup.Busy {
 		return m, nil
 	}
+	if msg.String() == "ctrl+t" {
+		m.setup.TelegramEnabled = !m.setup.TelegramEnabled
+		if !m.setup.TelegramEnabled && m.setup.Focus == 2 {
+			m.setup.Focus = 1
+		}
+		m.setup.Error = ""
+		return m, m.focusSetupField()
+	}
 	switch msg.String() {
 	case "tab", "shift+tab":
-		if m.setup.Focus == 0 {
-			m.setup.Server.Blur()
-			m.setup.Focus = 1
-			return m, m.setup.PAT.Focus()
+		fields := 2
+		if m.setup.TelegramEnabled {
+			fields = 3
 		}
+		m.setup.Server.Blur()
 		m.setup.PAT.Blur()
-		m.setup.Focus = 0
-		return m, m.setup.Server.Focus()
+		m.setup.TelegramToken.Blur()
+		if msg.String() == "shift+tab" {
+			m.setup.Focus = (m.setup.Focus + fields - 1) % fields
+		} else {
+			m.setup.Focus = (m.setup.Focus + 1) % fields
+		}
+		return m, m.focusSetupField()
 	case "enter":
 		url := strings.TrimRight(strings.TrimSpace(m.setup.Server.Value()), "/")
 		token := strings.TrimSpace(m.setup.PAT.Value())
+		telegramToken := strings.TrimSpace(m.setup.TelegramToken.Value())
 		if url == "" || token == "" {
 			m.setup.Error = "Server URL and Personal Access Token are required."
 			return m, nil
@@ -202,18 +238,39 @@ func (m Model) updateSetup(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.setup.Error = "Server URL must start with http:// or https://"
 			return m, nil
 		}
+		if m.setup.TelegramEnabled && telegramToken == "" {
+			m.setup.Error = "Telegram bot token is required when forwarding is enabled."
+			return m, nil
+		}
 		m.setup.Error = ""
 		m.setup.Busy = true
-		return m, validateSetupCmd(m.ctx, url, token, m.cfg, m.keychain, m.infoLog, m.errLog)
+		return m, validateSetupCmd(m.ctx, url, token, m.setup.TelegramEnabled, telegramToken, m.cfg, m.keychain, m.infoLog, m.errLog)
 	}
 
 	var cmd tea.Cmd
-	if m.setup.Focus == 0 {
+	switch m.setup.Focus {
+	case 0:
 		m.setup.Server, cmd = m.setup.Server.Update(msg)
-	} else {
+	case 1:
 		m.setup.PAT, cmd = m.setup.PAT.Update(msg)
+	case 2:
+		m.setup.TelegramToken, cmd = m.setup.TelegramToken.Update(msg)
 	}
 	return m, cmd
+}
+
+func (m *Model) focusSetupField() tea.Cmd {
+	switch m.setup.Focus {
+	case 0:
+		return m.setup.Server.Focus()
+	case 1:
+		return m.setup.PAT.Focus()
+	case 2:
+		return m.setup.TelegramToken.Focus()
+	default:
+		m.setup.Focus = 0
+		return m.setup.Server.Focus()
+	}
 }
 
 func (m Model) updateMainKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -379,7 +436,8 @@ func (m Model) updateMainKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m Model) enterMain(session *mm.Session) (tea.Model, tea.Cmd) {
 	if session == nil || session.User == nil || session.Team == nil {
 		m.mode = modeSetup
-		m.setup = ui.NewSetup(m.cfg.ServerURL, "")
+		telegramToken, _ := keychain.Telegram().Get()
+		m.setup = ui.NewSetup(m.cfg.ServerURL, "", m.cfg.Telegram.Enabled, telegramToken)
 		m.setup.Error = "Mattermost returned an incomplete session."
 		return m, nil
 	}
@@ -605,24 +663,126 @@ func (m *Model) resize() {
 	m.compose.Input.SetWidth(max(10, rightWidth-4))
 }
 
-func validateSetupCmd(ctx context.Context, url, token string, cfg config.Config, store keychain.Store, infoLog, errLog *slog.Logger) tea.Cmd {
+func validateSetupCmd(ctx context.Context, url, token string, telegramEnabled bool, telegramToken string, cfg config.Config, store keychain.Store, infoLog, errLog *slog.Logger) tea.Cmd {
 	return func() tea.Msg {
 		svc := mm.New(url, token, infoLog, errLog)
 		session, err := svc.Bootstrap(ctx)
 		if err != nil {
 			svc.Close()
-			return setupValidatedMsg{url: url, err: err}
+			return setupValidatedMsg{cfg: cfg, err: err}
 		}
+
+		cfg.ServerURL = url
+		cfg.Telegram.Configured = true
+		cfg.Telegram.Enabled = telegramEnabled
+		cfg.Telegram.ChatID = 0
+
+		if telegramEnabled {
+			chatID, pairErr := pairTelegram(ctx, telegramToken)
+			if pairErr != nil {
+				svc.Close()
+				return setupValidatedMsg{cfg: cfg, err: pairErr}
+			}
+			cfg.Telegram.ChatID = chatID
+		}
+
 		if err := store.Put(token); err != nil {
 			svc.Close()
-			return setupValidatedMsg{url: url, err: err}
+			return setupValidatedMsg{cfg: cfg, err: err}
 		}
-		cfg.ServerURL = url
+		if telegramEnabled {
+			if err := keychain.Telegram().Put(telegramToken); err != nil {
+				svc.Close()
+				return setupValidatedMsg{cfg: cfg, err: err}
+			}
+		}
 		if err := config.Save(cfg); err != nil {
 			svc.Close()
-			return setupValidatedMsg{url: url, err: err}
+			return setupValidatedMsg{cfg: cfg, err: err}
 		}
-		return setupValidatedMsg{service: svc, session: session, url: url}
+		binary, err := os.Executable()
+		if err != nil {
+			svc.Close()
+			return setupValidatedMsg{cfg: cfg, err: fmt.Errorf("resolve KMO executable: %w", err)}
+		}
+		if err := launchd.InstallAndStart(binary); err != nil {
+			svc.Close()
+			return setupValidatedMsg{cfg: cfg, err: fmt.Errorf("restart KMO daemon: %w", err)}
+		}
+		return setupValidatedMsg{service: svc, session: session, cfg: cfg}
+	}
+}
+
+func pairTelegram(ctx context.Context, token string) (int64, error) {
+	client := tg.New(token)
+	if _, err := client.GetMe(ctx); err != nil {
+		return 0, fmt.Errorf("validate Telegram bot token: %w", err)
+	}
+	baseline, err := client.GetUpdates(ctx, 0, 0)
+	if err != nil {
+		return 0, fmt.Errorf("read Telegram pairing baseline: %w", err)
+	}
+	var offset int64
+	for _, up := range baseline {
+		if up.UpdateID >= offset {
+			offset = up.UpdateID + 1
+		}
+	}
+	pairCtx, cancel := context.WithTimeout(ctx, telegramPairWindow)
+	defer cancel()
+	candidates := map[int64]struct{}{}
+	for {
+		updates, getErr := client.GetUpdates(pairCtx, offset, 10)
+		if getErr != nil {
+			if pairCtx.Err() != nil {
+				return 0, fmt.Errorf("Telegram pairing timed out waiting for /start")
+			}
+			return 0, fmt.Errorf("wait for Telegram /start: %w", getErr)
+		}
+		for _, up := range updates {
+			if up.UpdateID >= offset {
+				offset = up.UpdateID + 1
+			}
+			if up.Message == nil {
+				continue
+			}
+			text := strings.TrimSpace(up.Message.Text)
+			if text == "/start" || strings.HasPrefix(text, "/start ") {
+				candidates[up.Message.Chat.ID] = struct{}{}
+			}
+		}
+		if len(candidates) > 1 {
+			return 0, fmt.Errorf("multiple Telegram /start chats detected; pairing requires exactly one")
+		}
+		if len(candidates) == 1 {
+			grace, graceErr := client.GetUpdates(pairCtx, offset, 2)
+			if graceErr != nil && pairCtx.Err() == nil {
+				return 0, fmt.Errorf("confirm Telegram pairing: %w", graceErr)
+			}
+			for _, up := range grace {
+				if up.UpdateID >= offset {
+					offset = up.UpdateID + 1
+				}
+				if up.Message == nil {
+					continue
+				}
+				text := strings.TrimSpace(up.Message.Text)
+				if text == "/start" || strings.HasPrefix(text, "/start ") {
+					candidates[up.Message.Chat.ID] = struct{}{}
+				}
+			}
+			if len(candidates) != 1 {
+				return 0, fmt.Errorf("multiple Telegram /start chats detected; pairing requires exactly one")
+			}
+			var chatID int64
+			for id := range candidates {
+				chatID = id
+			}
+			if _, err := client.SendMessage(pairCtx, chatID, "KMO Telegram forwarding is actief."); err != nil {
+				return 0, fmt.Errorf("send Telegram test message: %w", err)
+			}
+			return chatID, nil
+		}
 	}
 }
 

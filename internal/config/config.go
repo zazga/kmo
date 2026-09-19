@@ -28,9 +28,16 @@ type Keybindings struct {
 	Down          string `toml:"down"`
 }
 
+type Telegram struct {
+	Configured bool  `toml:"configured"`
+	Enabled    bool  `toml:"enabled"`
+	ChatID     int64 `toml:"chat_id,omitempty"`
+}
+
 type Config struct {
 	ServerURL          string      `toml:"server_url"`
 	LastConversationID string      `toml:"last_conversation_id,omitempty"`
+	Telegram           Telegram    `toml:"telegram"`
 	Keybindings        Keybindings `toml:"keybindings"`
 }
 
@@ -146,6 +153,10 @@ func SaveTo(path string, cfg Config) error {
 
 func (c Config) Complete() bool {
 	return strings.HasPrefix(c.ServerURL, "http://") || strings.HasPrefix(c.ServerURL, "https://")
+}
+
+func (c Config) SetupComplete() bool {
+	return c.Complete() && c.Telegram.Configured
 }
 
 func ValidBinding(s string) bool {

@@ -67,27 +67,47 @@ func NewCompose() Compose {
 func (c *Compose) CancelReply() { c.ReplyRootID = ""; c.ReplyLabel = "" }
 
 type Setup struct {
-	Server, PAT textinput.Model
-	Focus       int
-	Error       string
-	Busy        bool
+	Server, PAT, TelegramToken textinput.Model
+	TelegramEnabled            bool
+	Focus                      int
+	Error                      string
+	Busy                       bool
 }
 
-func NewSetup(initialURL, initialPAT string) Setup {
+func NewSetup(initialURL, initialPAT string, telegramArgs ...any) Setup {
+	telegramEnabled := false
+	telegramToken := ""
+	if len(telegramArgs) > 0 {
+		if v, ok := telegramArgs[0].(bool); ok {
+			telegramEnabled = v
+		}
+	}
+	if len(telegramArgs) > 1 {
+		if v, ok := telegramArgs[1].(string); ok {
+			telegramToken = v
+		}
+	}
 	server := textinput.New()
 	server.Placeholder = "https://mattermost.example.com"
-	server.Prompt = "Server  "
+	server.Prompt = "Server    "
 	server.SetValue(initialURL)
 	server.Focus()
 	server.SetWidth(60)
 	pat := textinput.New()
 	pat.Placeholder = "Personal Access Token"
-	pat.Prompt = "PAT     "
+	pat.Prompt = "PAT       "
 	pat.SetValue(initialPAT)
 	pat.EchoMode = textinput.EchoPassword
 	pat.EchoCharacter = '•'
 	pat.SetWidth(60)
-	return Setup{Server: server, PAT: pat}
+	tg := textinput.New()
+	tg.Placeholder = "Telegram bot token"
+	tg.Prompt = "Telegram  "
+	tg.SetValue(telegramToken)
+	tg.EchoMode = textinput.EchoPassword
+	tg.EchoCharacter = '•'
+	tg.SetWidth(60)
+	return Setup{Server: server, PAT: pat, TelegramToken: tg, TelegramEnabled: telegramEnabled}
 }
 
 func (s *Sidebar) ApplyFilter(all []*mm.Conversation) {
@@ -124,6 +144,7 @@ func ApplyTheme(sidebar *Sidebar, compose *Compose, setup *Setup, isDark bool) {
 	if setup != nil {
 		setup.Server.SetStyles(textinput.DefaultStyles(isDark))
 		setup.PAT.SetStyles(textinput.DefaultStyles(isDark))
+		setup.TelegramToken.SetStyles(textinput.DefaultStyles(isDark))
 	}
 }
 
@@ -136,7 +157,6 @@ func FuzzyMatch(candidate, query string) bool {
 	if strings.Contains(candidate, query) || isSubsequence(candidate, query) {
 		return true
 	}
-
 	maxDistance := 1
 	if len([]rune(query)) >= 7 {
 		maxDistance = 2
