@@ -19,9 +19,10 @@ type Mapping struct {
 }
 
 type State struct {
-	mu       sync.Mutex
-	path     string
-	Mappings map[string]Mapping `json:"mappings"`
+	mu           sync.Mutex
+	path         string
+	Mappings     map[string]Mapping `json:"mappings"`
+	LastUpdateID int64              `json:"last_update_id,omitempty"`
 }
 
 func StatePath() (string, error) {
@@ -53,7 +54,7 @@ func LoadState() (*State, error) {
 	if s.Mappings == nil {
 		s.Mappings = map[string]Mapping{}
 	}
-	s.Cleanup(time.Now())
+	_ = s.Cleanup(time.Now())
 	return s, nil
 }
 
@@ -79,6 +80,25 @@ func (s *State) Resolve(messageID int64, now time.Time) (string, bool, bool) {
 		return "", false, true
 	}
 	return m.ChannelID, true, false
+}
+
+func (s *State) Offset() int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.LastUpdateID <= 0 {
+		return 0
+	}
+	return s.LastUpdateID + 1
+}
+
+func (s *State) AdvanceUpdate(updateID int64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if updateID <= s.LastUpdateID {
+		return nil
+	}
+	s.LastUpdateID = updateID
+	return s.saveLocked()
 }
 
 func (s *State) Cleanup(now time.Time) error {
