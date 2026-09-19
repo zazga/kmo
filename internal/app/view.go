@@ -41,12 +41,35 @@ func (m Model) View() tea.View {
 
 func (m Model) viewSetup() string {
 	title := lipgloss.NewStyle().Foreground(accent).Bold(true).Render("KMO setup")
-	subtitle := "Connect one Mattermost account. Your PAT is stored in macOS Keychain."
-	body := []string{title, subtitle, "", m.setup.Server.View(), m.setup.PAT.View(), ""}
+	subtitle := "Known values stay filled. Secrets are stored in macOS Keychain."
+	telegramState := "disabled"
+	if m.setup.TelegramEnabled {
+		telegramState = "enabled"
+	}
+	body := []string{
+		title,
+		subtitle,
+		"",
+		m.setup.Server.View(),
+		m.setup.PAT.View(),
+		"",
+		"Telegram forwarding: " + telegramState + "  (Ctrl+T toggle)",
+	}
+	if m.setup.TelegramEnabled {
+		body = append(body, m.setup.TelegramToken.View())
+	}
+	body = append(body, "")
 	if m.setup.Busy {
-		body = append(body, lipgloss.NewStyle().Foreground(accent).Render("Validating Mattermost credentials…"))
+		if m.setup.TelegramEnabled {
+			body = append(body,
+				lipgloss.NewStyle().Foreground(accent).Render("Validating credentials and waiting for one new /start…"),
+				"Send /start to your Telegram bot now. Old /start messages are ignored.",
+			)
+		} else {
+			body = append(body, lipgloss.NewStyle().Foreground(accent).Render("Validating Mattermost credentials…"))
+		}
 	} else {
-		body = append(body, "Tab switch field  •  Enter connect")
+		body = append(body, "Tab switch field  •  Ctrl+T Telegram  •  Enter save/connect")
 	}
 	if m.setup.Error != "" {
 		body = append(body, "", lipgloss.NewStyle().Bold(true).Render(m.setup.Error))
@@ -174,12 +197,16 @@ func (m Model) viewChatPane() string {
 }
 
 func (m Model) viewStatus() string {
-	state := m.connection
-	if state == "" {
-		state = "offline"
+	mmState := m.connection
+	if mmState == "" {
+		mmState = "offline"
 	}
-	left := "Mattermost: " + state
-	if m.statusErr != "" && state != "connected" {
+	tgState := m.telegramConnection
+	if tgState == "" {
+		tgState = "unavailable"
+	}
+	left := "MM: " + mmState + " · TG: " + tgState
+	if m.statusErr != "" && mmState != "connected" {
 		left += " — " + oneLine(m.statusErr, 60)
 	}
 	hint := m.keys.Shortcuts + " shortcuts"
