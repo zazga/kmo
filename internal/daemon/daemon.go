@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -22,6 +23,8 @@ const (
 	onlineInterval    = 240 * time.Second
 	cooldownInterval  = 5 * time.Minute
 )
+
+var errTelegramDisabled = errors.New("telegram forwarding disabled")
 
 type Status struct {
 	Daemon        string `json:"daemon"`
@@ -120,11 +123,15 @@ func telegramReplyLoop(ctx context.Context, cfg config.Config, mmToken string, c
 		if attempt < len(delays) {
 			d := delays[attempt]
 			attempt++
-			if !sleepContext(ctx, d) { return }
+			if !sleepContext(ctx, d) {
+				return
+			}
 			continue
 		}
 		hub.setTelegram("unavailable")
-		if !sleepContext(ctx, cooldownInterval) { return }
+		if !sleepContext(ctx, cooldownInterval) {
+			return
+		}
 		attempt = 0
 	}
 }
@@ -154,17 +161,26 @@ func mattermostForwardLoop(ctx context.Context, cfg config.Config, mmToken strin
 	attempt := 0
 	for ctx.Err() == nil {
 		err := runMattermostForwardSession(ctx, cfg, mmToken, client, state, hub, infoLog, errLog)
-		if ctx.Err() != nil { return }
+		if ctx.Err() != nil {
+			return
+		}
+		if errors.Is(err, errTelegramDisabled) {
+			return
+		}
 		if err != nil && errLog != nil {
 			errLog.Warn("Mattermost forwarding disconnected", "component", "mattermost", "error", err)
 		}
 		if attempt < len(delays) {
 			d := delays[attempt]
 			attempt++
-			if !sleepContext(ctx, d) { return }
+			if !sleepContext(ctx, d) {
+				return
+			}
 			continue
 		}
-		if !sleepContext(ctx, cooldownInterval) { return }
+		if !sleepContext(ctx, cooldownInterval) {
+			return
+		}
 		attempt = 0
 	}
 }
@@ -192,12 +208,16 @@ func runMattermostForwardSession(ctx context.Context, cfg config.Config, mmToken
 			case mm.EventRefreshConversations:
 				items, loadErr := svc.LoadConversations(ctx, session.User, session.Team)
 				if loadErr != nil {
-					if errLog != nil { errLog.Warn("refresh daemon conversations failed", "component", "mattermost", "error", loadErr) }
+					if errLog != nil {
+						errLog.Warn("refresh daemon conversations failed", "component", "mattermost", "error", loadErr)
+					}
 					continue
 				}
 				convs = map[string]*mm.Conversation{}
 				for _, c := range items {
-					if c != nil && c.Channel != nil { convs[c.Channel.Id] = c }
+					if c != nil && c.Channel != nil {
+						convs[c.Channel.Id] = c
+					}
 				}
 			case mm.EventPosted:
 				if ev.Post == nil || ev.Post.UserId == session.User.Id || strings.TrimSpace(ev.Post.Message) == "" {
@@ -208,17 +228,21 @@ func runMattermostForwardSession(ctx context.Context, cfg config.Config, mmToken
 					continue
 				}
 				header := fmt.Sprintf("%s · %s", conv.Display, time.UnixMilli(ev.Post.CreateAt).Local().Format("15:04"))
-				if ev.Post.RootId != "" { header += " · reply" }
+				if ev.Post.RootId != "" {
+					header += " · reply"
+				}
 				for _, part := range tg.SplitMessage(header, ev.Post.Message) {
 					msg, sendErr := client.SendMessage(ctx, cfg.Telegram.ChatID, part)
 					if sendErr != nil {
 						if isTelegramAuthError(sendErr) {
 							disableTelegram(errLog)
 							hub.setTelegram("disabled")
-							return nil
+							return errTelegramDisabled
 						}
 						hub.setTelegram("reconnecting")
-						if errLog != nil { errLog.Warn("forward DM to Telegram failed", "component", "telegram", "error", sendErr) }
+						if errLog != nil {
+							errLog.Warn("forward DM to Telegram failed", "component", "telegram", "error", sendErr)
+						}
 						continue
 					}
 					if err := state.Put(msg.MessageID, ev.Post.ChannelId, time.Now()); err != nil && errLog != nil {
@@ -241,10 +265,14 @@ func handleTelegramReply(ctx context.Context, client *tg.Client, mattermost *mm.
 		_, _ = client.SendMessage(ctx, chatID, "Deze reply is verlopen.")
 		return
 	}
-	if !ok { return }
+	if !ok {
+		return
+	}
 	if _, err := mattermost.SendPost(ctx, channelID, msg.Text, ""); err != nil {
 		_, _ = client.SendMessage(ctx, chatID, "Kon bericht niet naar Mattermost sturen: "+err.Error())
-		if errLog != nil { errLog.Warn("Telegram reply send failed", "component", "telegram", "error", err) }
+		if errLog != nil {
+			errLog.Warn("Telegram reply send failed", "component", "telegram", "error", err)
+		}
 	}
 }
 
@@ -253,7 +281,8 @@ func stateCleanupLoop(ctx context.Context, state *tg.State, errLog *slog.Logger)
 	defer t.Stop()
 	for {
 		select {
-		case <-ctx.Done(): return
+		case <-ctx.Done():
+			return
 		case <-t.C:
 			if err := state.Cleanup(time.Now()); err != nil && errLog != nil {
 				errLog.Warn("Telegram state cleanup failed", "component", "telegram", "error", err)
@@ -266,14 +295,22 @@ func retryOperation(ctx context.Context, setStatus func(string), op func() error
 	delays := []time.Duration{time.Second, 2 * time.Second, 5 * time.Second, 10 * time.Second, 30 * time.Second}
 	for _, delay := range delays {
 		setStatus("reconnecting")
-		if err := op(); err == nil { return nil }
-		if !sleepContext(ctx, delay) { return ctx.Err() }
+		if err := op(); err == nil {
+			return nil
+		}
+		if !sleepContext(ctx, delay) {
+			return ctx.Err()
+		}
 	}
 	setStatus("unavailable")
 	for {
-		if !sleepContext(ctx, cooldownInterval) { return ctx.Err() }
+		if !sleepContext(ctx, cooldownInterval) {
+			return ctx.Err()
+		}
 		setStatus("reconnecting")
-		if err := op(); err == nil { return nil }
+		if err := op(); err == nil {
+			return nil
+		}
 		setStatus("unavailable")
 	}
 }
@@ -281,7 +318,9 @@ func retryOperation(ctx context.Context, setStatus func(string), op func() error
 func disableTelegram(errLog *slog.Logger) {
 	cfg, _, err := config.Load()
 	if err != nil {
-		if errLog != nil { errLog.Error("load config while disabling Telegram", "component", "telegram", "error", err) }
+		if errLog != nil {
+			errLog.Error("load config while disabling Telegram", "component", "telegram", "error", err)
+		}
 		return
 	}
 	cfg.Telegram.Enabled = false
@@ -291,7 +330,9 @@ func disableTelegram(errLog *slog.Logger) {
 }
 
 func isTelegramAuthError(err error) bool {
-	if err == nil { return false }
+	if err == nil {
+		return false
+	}
 	s := strings.ToLower(err.Error())
 	return strings.Contains(s, "401") || strings.Contains(s, "unauthorized")
 }
@@ -299,50 +340,109 @@ func isTelegramAuthError(err error) bool {
 func sleepContext(ctx context.Context, d time.Duration) bool {
 	t := time.NewTimer(d)
 	defer t.Stop()
-	select { case <-ctx.Done(): return false; case <-t.C: return true }
+	select {
+	case <-ctx.Done():
+		return false
+	case <-t.C:
+		return true
+	}
 }
 
 func SocketPath() (string, error) {
 	home, err := os.UserHomeDir()
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	return filepath.Join(home, ".local", "state", "kmo", "kmo.sock"), nil
 }
 
 func (h *statusHub) snapshot() Status {
-	h.mu.RLock(); defer h.mu.RUnlock()
+	h.mu.RLock()
+	defer h.mu.RUnlock()
 	return Status{Daemon: "running", Mattermost: h.mm, Telegram: h.tg, UptimeSeconds: int64(time.Since(h.started).Seconds())}
 }
 
-func (h *statusHub) setMattermost(v string) { h.mu.Lock(); h.mm = v; h.mu.Unlock(); h.broadcast() }
-func (h *statusHub) setTelegram(v string) { h.mu.Lock(); h.tg = v; h.mu.Unlock(); h.broadcast() }
+func (h *statusHub) setMattermost(v string) {
+	h.mu.Lock()
+	h.mm = v
+	h.mu.Unlock()
+	h.broadcast()
+}
+
+func (h *statusHub) setTelegram(v string) {
+	h.mu.Lock()
+	h.tg = v
+	h.mu.Unlock()
+	h.broadcast()
+}
 
 func (h *statusHub) heartbeat(ctx context.Context) {
-	t := time.NewTicker(heartbeatInterval); defer t.Stop()
-	for { select { case <-ctx.Done(): return; case <-t.C: h.broadcast() } }
+	t := time.NewTicker(heartbeatInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			h.broadcast()
+		}
+	}
 }
 
 func (h *statusHub) serve(ctx context.Context, errLog *slog.Logger) {
-	path, err := SocketPath(); if err != nil { return }
+	path, err := SocketPath()
+	if err != nil {
+		return
+	}
 	_ = os.MkdirAll(filepath.Dir(path), 0o700)
 	_ = os.Remove(path)
 	ln, err := net.Listen("unix", path)
-	if err != nil { if errLog != nil { errLog.Error("status socket listen failed", "component", "daemon", "error", err) }; return }
-	defer func(){ _ = ln.Close(); _ = os.Remove(path) }()
-	go func(){ <-ctx.Done(); _ = ln.Close() }()
+	if err != nil {
+		if errLog != nil {
+			errLog.Error("status socket listen failed", "component", "daemon", "error", err)
+		}
+		return
+	}
+	defer func() {
+		_ = ln.Close()
+		_ = os.Remove(path)
+	}()
+	go func() {
+		<-ctx.Done()
+		_ = ln.Close()
+	}()
 	for {
-		conn, err := ln.Accept(); if err != nil { return }
-		h.mu.Lock(); h.clients[conn] = struct{}{}; h.mu.Unlock()
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		h.mu.Lock()
+		h.clients[conn] = struct{}{}
+		h.mu.Unlock()
 		h.write(conn)
 	}
 }
 
 func (h *statusHub) broadcast() {
-	h.mu.RLock(); clients := make([]net.Conn,0,len(h.clients)); for c := range h.clients { clients=append(clients,c) }; h.mu.RUnlock()
-	for _, c := range clients { h.write(c) }
+	h.mu.RLock()
+	clients := make([]net.Conn, 0, len(h.clients))
+	for c := range h.clients {
+		clients = append(clients, c)
+	}
+	h.mu.RUnlock()
+	for _, c := range clients {
+		h.write(c)
+	}
 }
 
 func (h *statusHub) write(c net.Conn) {
-	b, _ := json.Marshal(h.snapshot()); b = append(b, '\n')
+	b, _ := json.Marshal(h.snapshot())
+	b = append(b, '\n')
 	_ = c.SetWriteDeadline(time.Now().Add(time.Second))
-	if _, err := c.Write(b); err != nil { h.mu.Lock(); delete(h.clients,c); h.mu.Unlock(); _ = c.Close() }
+	if _, err := c.Write(b); err != nil {
+		h.mu.Lock()
+		delete(h.clients, c)
+		h.mu.Unlock()
+		_ = c.Close()
+	}
 }
