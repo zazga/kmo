@@ -28,9 +28,15 @@ type Keybindings struct {
 	Down          string `toml:"down"`
 }
 
+type Telegram struct {
+	Enabled bool  `toml:"enabled"`
+	ChatID  int64 `toml:"chat_id,omitempty"`
+}
+
 type Config struct {
 	ServerURL          string      `toml:"server_url"`
 	LastConversationID string      `toml:"last_conversation_id,omitempty"`
+	Telegram           Telegram    `toml:"telegram"`
 	Keybindings        Keybindings `toml:"keybindings"`
 }
 
