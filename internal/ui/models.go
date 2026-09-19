@@ -74,7 +74,15 @@ type Setup struct {
 	Busy                       bool
 }
 
-func NewSetup(initialURL, initialPAT string, telegramEnabled bool, telegramToken string) Setup {
+func NewSetup(initialURL, initialPAT string, telegramArgs ...any) Setup {
+	telegramEnabled := false
+	telegramToken := ""
+	if len(telegramArgs) > 0 {
+		if v, ok := telegramArgs[0].(bool); ok { telegramEnabled = v }
+	}
+	if len(telegramArgs) > 1 {
+		if v, ok := telegramArgs[1].(string); ok { telegramToken = v }
+	}
 	server := textinput.New()
 	server.Placeholder = "https://mattermost.example.com"
 	server.Prompt = "Server    "
@@ -113,7 +121,6 @@ func (s *Sidebar) ApplyFilter(all []*mm.Conversation) {
 			if c != nil && FuzzyMatch(strings.ToLower(c.Display+" "+c.SearchName), query) {
 				s.Filtered = append(s.Filtered, c)
 			}
-		}
 	}
 	if len(s.Filtered) == 0 {
 		s.Cursor = 0
