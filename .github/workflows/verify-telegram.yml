@@ -2,6 +2,8 @@ name: verify telegram feature
 on:
   push:
     branches: [feature/telegram-forwarder]
+  pull_request:
+    branches: [main]
 jobs:
   verify:
     runs-on: macos-15
