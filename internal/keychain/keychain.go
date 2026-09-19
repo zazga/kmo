@@ -8,19 +8,38 @@ import (
 	"strings"
 )
 
-const Service = "kmo"
+const (
+	Service         = "kmo"
+	TelegramService = "kmo-telegram"
+)
 
 type Store struct {
 	Service string
 	Account string
+	Label   string
 }
 
 func Default() Store {
+	return New(Service, "PAT")
+}
+
+func Telegram() Store {
+	return New(TelegramService, "Telegram bot token")
+}
+
+func New(service, label string) Store {
 	account := os.Getenv("USER")
 	if account == "" {
 		account = "kmo-user"
 	}
-	return Store{Service: Service, Account: account}
+	return Store{Service: service, Account: account, Label: label}
+}
+
+func (s Store) secretLabel() string {
+	if s.Label != "" {
+		return s.Label
+	}
+	return "secret"
 }
 
 func (s Store) Get() (string, error) {
@@ -29,21 +48,21 @@ func (s Store) Get() (string, error) {
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("read PAT from macOS Keychain: %s", strings.TrimSpace(stderr.String()))
+		return "", fmt.Errorf("read %s from macOS Keychain: %s", s.secretLabel(), strings.TrimSpace(stderr.String()))
 	}
 	return strings.TrimSpace(string(out)), nil
 }
 
-func (s Store) Put(token string) error {
-	token = strings.TrimSpace(token)
-	if token == "" {
-		return fmt.Errorf("refusing to store empty PAT")
+func (s Store) Put(secret string) error {
+	secret = strings.TrimSpace(secret)
+	if secret == "" {
+		return fmt.Errorf("refusing to store empty %s", s.secretLabel())
 	}
-	cmd := exec.Command("security", "add-generic-password", "-a", s.Account, "-s", s.Service, "-w", token, "-U")
+	cmd := exec.Command("security", "add-generic-password", "-a", s.Account, "-s", s.Service, "-w", secret, "-U")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("store PAT in macOS Keychain: %s", strings.TrimSpace(stderr.String()))
+		return fmt.Errorf("store %s in macOS Keychain: %s", s.secretLabel(), strings.TrimSpace(stderr.String()))
 	}
 	return nil
 }
