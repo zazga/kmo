@@ -67,27 +67,35 @@ func NewCompose() Compose {
 func (c *Compose) CancelReply() { c.ReplyRootID = ""; c.ReplyLabel = "" }
 
 type Setup struct {
-	Server, PAT textinput.Model
-	Focus       int
-	Error       string
-	Busy        bool
+	Server, PAT, TelegramToken textinput.Model
+	TelegramEnabled            bool
+	Focus                      int
+	Error                      string
+	Busy                       bool
 }
 
-func NewSetup(initialURL, initialPAT string) Setup {
+func NewSetup(initialURL, initialPAT string, telegramEnabled bool, telegramToken string) Setup {
 	server := textinput.New()
 	server.Placeholder = "https://mattermost.example.com"
-	server.Prompt = "Server  "
+	server.Prompt = "Server    "
 	server.SetValue(initialURL)
 	server.Focus()
 	server.SetWidth(60)
 	pat := textinput.New()
 	pat.Placeholder = "Personal Access Token"
-	pat.Prompt = "PAT     "
+	pat.Prompt = "PAT       "
 	pat.SetValue(initialPAT)
 	pat.EchoMode = textinput.EchoPassword
 	pat.EchoCharacter = '•'
 	pat.SetWidth(60)
-	return Setup{Server: server, PAT: pat}
+	tg := textinput.New()
+	tg.Placeholder = "Telegram bot token"
+	tg.Prompt = "Telegram  "
+	tg.SetValue(telegramToken)
+	tg.EchoMode = textinput.EchoPassword
+	tg.EchoCharacter = '•'
+	tg.SetWidth(60)
+	return Setup{Server: server, PAT: pat, TelegramToken: tg, TelegramEnabled: telegramEnabled}
 }
 
 func (s *Sidebar) ApplyFilter(all []*mm.Conversation) {
@@ -115,100 +123,53 @@ func (s *Sidebar) ApplyFilter(all []*mm.Conversation) {
 }
 
 func ApplyTheme(sidebar *Sidebar, compose *Compose, setup *Setup, isDark bool) {
-	if sidebar != nil {
-		sidebar.Query.SetStyles(textinput.DefaultStyles(isDark))
-	}
-	if compose != nil {
-		compose.Input.SetStyles(textarea.DefaultStyles(isDark))
-	}
+	if sidebar != nil { sidebar.Query.SetStyles(textinput.DefaultStyles(isDark)) }
+	if compose != nil { compose.Input.SetStyles(textarea.DefaultStyles(isDark)) }
 	if setup != nil {
 		setup.Server.SetStyles(textinput.DefaultStyles(isDark))
 		setup.PAT.SetStyles(textinput.DefaultStyles(isDark))
+		setup.TelegramToken.SetStyles(textinput.DefaultStyles(isDark))
 	}
 }
 
 func FuzzyMatch(candidate, query string) bool {
 	candidate = strings.TrimSpace(strings.ToLower(candidate))
 	query = strings.TrimSpace(strings.ToLower(query))
-	if query == "" {
-		return true
-	}
-	if strings.Contains(candidate, query) || isSubsequence(candidate, query) {
-		return true
-	}
-
+	if query == "" { return true }
+	if strings.Contains(candidate, query) || isSubsequence(candidate, query) { return true }
 	maxDistance := 1
-	if len([]rune(query)) >= 7 {
-		maxDistance = 2
-	}
-	for _, token := range strings.FieldsFunc(candidate, func(r rune) bool {
-		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
-	}) {
-		if token != "" && levenshteinWithin(token, query, maxDistance) {
-			return true
-		}
+	if len([]rune(query)) >= 7 { maxDistance = 2 }
+	for _, token := range strings.FieldsFunc(candidate, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) }) {
+		if token != "" && levenshteinWithin(token, query, maxDistance) { return true }
 	}
 	return false
 }
 
 func isSubsequence(candidate, query string) bool {
-	qr := []rune(query)
-	qi := 0
+	qr := []rune(query); qi := 0
 	for _, r := range candidate {
-		if qi < len(qr) && r == qr[qi] {
-			qi++
-			if qi == len(qr) {
-				return true
-			}
-		}
+		if qi < len(qr) && r == qr[qi] { qi++; if qi == len(qr) { return true } }
 	}
 	return false
 }
 
 func levenshteinWithin(a, b string, maxDistance int) bool {
 	ar, br := []rune(a), []rune(b)
-	if abs(len(ar)-len(br)) > maxDistance {
-		return false
-	}
+	if abs(len(ar)-len(br)) > maxDistance { return false }
 	prev := make([]int, len(br)+1)
-	for j := range prev {
-		prev[j] = j
-	}
+	for j := range prev { prev[j] = j }
 	for i := 1; i <= len(ar); i++ {
-		curr := make([]int, len(br)+1)
-		curr[0] = i
-		rowMin := curr[0]
+		curr := make([]int, len(br)+1); curr[0] = i; rowMin := curr[0]
 		for j := 1; j <= len(br); j++ {
-			cost := 0
-			if ar[i-1] != br[j-1] {
-				cost = 1
-			}
+			cost := 0; if ar[i-1] != br[j-1] { cost = 1 }
 			curr[j] = minInt(curr[j-1]+1, prev[j]+1, prev[j-1]+cost)
-			if curr[j] < rowMin {
-				rowMin = curr[j]
-			}
+			if curr[j] < rowMin { rowMin = curr[j] }
 		}
-		if rowMin > maxDistance {
-			return false
-		}
+		if rowMin > maxDistance { return false }
 		prev = curr
 	}
 	return prev[len(br)] <= maxDistance
 }
 
-func minInt(values ...int) int {
-	m := values[0]
-	for _, v := range values[1:] {
-		if v < m {
-			m = v
-		}
-	}
-	return m
-}
-
-func abs(v int) int {
-	if v < 0 {
-		return -v
-	}
-	return v
-}
+func minInt(values ...int) int { m := values[0]; for _, v := range values[1:] { if v < m { m = v } }; return m }
+func abs(v int) int { if v < 0 { return -v }; return v }
